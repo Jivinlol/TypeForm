@@ -133,6 +133,8 @@ def reorder_questions(form_id: str, ordered_ids: List[str], db: Session = Depend
 # ==========================================
 # RESPONSES & RESULTS ENDPOINTS
 # ==========================================
+
+
 @app.post("/forms/{form_id}/responses/", response_model=schemas.ResponseDetail, status_code=status.HTTP_201_CREATED)
 def submit_response(form_id: str, response: schemas.ResponseCreate, db: Session = Depends(get_db)):
     """PUBLIC: Endpoint for the public Respondent flow to submit their answers."""
@@ -140,10 +142,7 @@ def submit_response(form_id: str, response: schemas.ResponseCreate, db: Session 
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
 
-    # ENFORCE PUBLISHED STATUS: Draft forms/previews cannot accept public responses
-    if form.status != "published":
-        raise HTTPException(status_code=403, detail="This form is currently closed or not accepting responses.")
-
+    # Validate questions and required fields first so preview validation still works correctly
     valid_questions = {q.id: q for q in form.questions}
     submitted_answers = {ans.question_id: ans.value for ans in response.answers}
 
@@ -159,6 +158,17 @@ def submit_response(form_id: str, response: schemas.ResponseCreate, db: Session 
                     status_code=422, 
                     detail=f"Server Validation Failed: Question '{question.title}' is required."
                 )
+
+    # CHECK IF FORM IS PUBLISHED
+    if form.status != "published":
+        # PREVIEW MODE: Return a dummy success response without committing anything to the database!
+        # This allows creators to test form flow and validation in preview mode without polluting results.
+        return schemas.ResponseDetail(
+            id="preview-mode-id",
+            form_id=form_id,
+            created_at=datetime.utcnow(),
+            answers=[schemas.AnswerDetail(id="preview", response_id="preview-mode-id", question_id=ans.question_id, value=ans.value) for ans in response.answers]
+        )
 
     try:
         new_response = models.Response(form_id=form_id)
@@ -181,6 +191,9 @@ def submit_response(form_id: str, response: schemas.ResponseCreate, db: Session 
         db.rollback()
         print(f"Submission Error: {e}")
         raise HTTPException(status_code=500, detail="Database transaction failed during submission.")
+
+
+
 
 @app.get("/forms/{form_id}/responses/", response_model=List[schemas.ResponseDetail])
 def get_form_responses(form_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
