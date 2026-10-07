@@ -7,7 +7,7 @@ export interface Question {
   title: string;
   description?: string;
   required: boolean;
-  order_index: int;
+  order_index: number;
   settings: Record<string, any>;
 }
 
